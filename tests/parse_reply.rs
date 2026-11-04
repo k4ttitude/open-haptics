@@ -90,3 +90,19 @@ fn without_magic_is_bad_magic() {
     );
     assert_eq!(parse_reply(CMD_INFO, &[]), Err(ProtocolError::BadMagic));
 }
+
+#[test]
+fn a3_requires_bytes_3_and_4_to_be_zero() {
+    // The 0xA3 parser checks both (note, item 4, 0x14028eff7 and 0x14028effd). The checksum is
+    // recomputed so that only the zero check can reject the frame.
+    for byte in [3, 4] {
+        let mut report = captured::bytes(MOTOR_MAP_CHUNKS[0]);
+        report[byte] = 1;
+        report[31] = report[2..31].iter().fold(0u8, |s, b| s.wrapping_add(*b));
+        assert_eq!(
+            parse_reply(CMD_MOTOR_MAP, &report),
+            Err(ProtocolError::BadMagic),
+            "byte {byte}"
+        );
+    }
+}

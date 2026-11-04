@@ -31,6 +31,8 @@ const MOTOR_MAP_RAM: u8 = 6;
 const CHUNK_LEN: usize = 20;
 /// The whole read is exactly 64 bytes (note, item 4, 0x1402839a6).
 pub const MOTOR_MAP_LEN: usize = 64;
+/// Chunks needed for the whole map; the last one holds the remainder.
+const CHUNK_COUNT: usize = MOTOR_MAP_LEN.div_ceil(CHUNK_LEN);
 /// The engine retries the whole `0xA1` plus `0xA3` read up to 3 times (0x140283e51).
 const MOTOR_MAP_ATTEMPTS: usize = 3;
 
@@ -126,8 +128,7 @@ pub enum MotorMapError {
     SlotMismatch { expected: u8, got: u8 },
     WrongTotal(u16),
     WrongIndex { expected: u8, got: u8 },
-    BadCount(u8),
-    WrongLength(usize),
+    BadCount { expected: u8, got: u8 },
 }
 
 impl fmt::Display for MotorMapError {
@@ -161,14 +162,8 @@ impl fmt::Display for MotorMapError {
                     "motor map chunk {got} arrived, expected chunk {expected}"
                 )
             }
-            Self::BadCount(count) => {
-                write!(
-                    f,
-                    "motor map chunk holds {count} bytes, at most {CHUNK_LEN} allowed"
-                )
-            }
-            Self::WrongLength(len) => {
-                write!(f, "motor map came to {len} bytes, expected {MOTOR_MAP_LEN}")
+            Self::BadCount { expected, got } => {
+                write!(f, "motor map chunk holds {got} bytes, expected {expected}")
             }
         }
     }
@@ -182,6 +177,7 @@ impl From<AskError> for MotorMapError {
     }
 }
 
+#[derive(Debug)]
 pub struct MotorMap {
     pub slot: u8,
     pub map: [u8; MOTOR_MAP_LEN],
@@ -202,16 +198,12 @@ pub fn read_motor_map<T: Transport>(t: &mut T) -> Result<MotorMap, MotorMapError
 
 fn read_motor_map_once<T: Transport>(t: &mut T) -> Result<MotorMap, MotorMapError> {
     let slot = read_slot(t)?;
-    let mut map = Vec::with_capacity(MOTOR_MAP_LEN);
-    let mut index = 0u8;
-    while map.len() < MOTOR_MAP_LEN {
-        map.extend_from_slice(&read_chunk(t, slot, index)?);
-        index += 1;
+    let mut map = [0u8; MOTOR_MAP_LEN];
+    for index in 0..CHUNK_COUNT {
+        let start = index * CHUNK_LEN;
+        let end = (start + CHUNK_LEN).min(MOTOR_MAP_LEN);
+        map[start..end].copy_from_slice(&read_chunk(t, slot, index as u8, end - start)?);
     }
-    let len = map.len();
-    let map = map
-        .try_into()
-        .map_err(|_| MotorMapError::WrongLength(len))?;
     Ok(MotorMap { slot, map })
 }
 
@@ -225,7 +217,12 @@ fn read_slot<T: Transport>(t: &mut T) -> Result<u8, MotorMapError> {
 }
 
 /// Reply payload layout: RAM id, slot, total (u16 LE), chunk index, count, data (note, item 4).
-fn read_chunk<T: Transport>(t: &mut T, slot: u8, index: u8) -> Result<Vec<u8>, MotorMapError> {
+fn read_chunk<T: Transport>(
+    t: &mut T,
+    slot: u8,
+    index: u8,
+    expected_count: usize,
+) -> Result<Vec<u8>, MotorMapError> {
     let request = [READ_CHUNK, MOTOR_MAP_RAM, index, CHUNK_LEN as u8];
     let p = ask(t, CMD_MOTOR_MAP, &request, REPLY_TIMEOUT)?;
     let data_start = 6;
@@ -252,8 +249,11 @@ fn read_chunk<T: Transport>(t: &mut T, slot: u8, index: u8) -> Result<Vec<u8>, M
         });
     }
     let count = p[5];
-    if usize::from(count) > CHUNK_LEN {
-        return Err(MotorMapError::BadCount(count));
+    if usize::from(count) != expected_count {
+        return Err(MotorMapError::BadCount {
+            expected: expected_count as u8,
+            got: count,
+        });
     }
     Ok(p[data_start..data_start + usize::from(count)].to_vec())
 }

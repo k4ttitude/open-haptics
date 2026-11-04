@@ -124,7 +124,11 @@ pub fn parse_reply(cmd: u8, report: &[u8]) -> Result<&[u8], ProtocolError> {
         let frame = report
             .get(start..start + FRAME_LEN)
             .ok_or(ProtocolError::Short)?;
-        // Only the 0xA3 parser verifies the checksum (0x14028efc0).
+        // Only the 0xA3 parser verifies the checksum (0x14028efc0) and requires byte 4 == 0
+        // (0x14028effd).
+        if cmd == CMD_MOTOR_MAP && frame[4] != 0 {
+            return Err(ProtocolError::BadMagic);
+        }
         if cmd == CMD_MOTOR_MAP && checksum(&frame[2..FRAME_LEN - 1]) != frame[FRAME_LEN - 1] {
             return Err(ProtocolError::BadChecksum);
         }

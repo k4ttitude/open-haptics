@@ -45,7 +45,12 @@ impl Hidraw {
                 ),
                 _ => e,
             })?;
-        Ok(Hidraw { file })
+        Ok(Hidraw::from_file(file))
+    }
+
+    /// Wraps any pollable fd; the tests use a socket pair instead of a device node.
+    pub fn from_file(file: File) -> Hidraw {
+        Hidraw { file }
     }
 }
 

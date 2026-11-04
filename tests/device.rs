@@ -62,22 +62,74 @@ fn gives_up_after_three_attempts() {
     ));
 }
 
-#[test]
-fn rejects_a_wrong_total_ram_id_or_index() {
-    for bad in [
-        reply(CMD_MOTOR_MAP, &[6, 1, 65, 0, 0, 20]),
-        reply(CMD_MOTOR_MAP, &[5, 1, 64, 0, 0, 20]),
-        reply(CMD_MOTOR_MAP, &[6, 1, 64, 0, 1, 20]),
-        reply(CMD_MOTOR_MAP, &[6, 1, 64, 0, 0, 21]),
-    ] {
-        let mut reports = Vec::new();
-        for _ in 0..3 {
-            reports.push(reply(CMD_SLOT, &[1]));
-            reports.push(bad.clone());
-        }
-        let mut t = ScriptedTransport::new(reports);
-        assert!(device::read_motor_map(&mut t).is_err());
+/// Three attempts, each answered with the same bad chunk, so only the validation can fail.
+fn read_with_bad_chunk(bad: Vec<u8>) -> MotorMapError {
+    let mut reports = Vec::new();
+    for _ in 0..3 {
+        reports.push(reply(CMD_SLOT, &[1]));
+        reports.push(bad.clone());
     }
+    device::read_motor_map(&mut ScriptedTransport::new(reports)).unwrap_err()
+}
+
+#[test]
+fn rejects_a_wrong_total() {
+    let err = read_with_bad_chunk(reply(CMD_MOTOR_MAP, &[6, 1, 65, 0, 0, 20]));
+    assert!(matches!(err, MotorMapError::WrongTotal(65)), "{err}");
+}
+
+#[test]
+fn rejects_a_wrong_ram_id() {
+    let err = read_with_bad_chunk(reply(CMD_MOTOR_MAP, &[5, 1, 64, 0, 0, 20]));
+    assert!(matches!(err, MotorMapError::WrongRam(5)), "{err}");
+}
+
+#[test]
+fn rejects_a_wrong_chunk_index() {
+    let err = read_with_bad_chunk(reply(CMD_MOTOR_MAP, &[6, 1, 64, 0, 1, 20]));
+    assert!(
+        matches!(
+            err,
+            MotorMapError::WrongIndex {
+                expected: 0,
+                got: 1
+            }
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn rejects_a_chunk_count_other_than_the_expected_one() {
+    // Too many, zero, and a short non-final chunk (which would misalign the map).
+    for count in [21, 0, 19] {
+        let err = read_with_bad_chunk(reply(CMD_MOTOR_MAP, &[6, 1, 64, 0, 0, count]));
+        assert!(
+            matches!(err, MotorMapError::BadCount { expected: 20, got } if got == count),
+            "{err}"
+        );
+    }
+}
+
+#[test]
+fn the_final_chunk_must_hold_the_remaining_four_bytes() {
+    let mut reports = Vec::new();
+    for _ in 0..3 {
+        reports.push(reply(CMD_SLOT, &[1]));
+        reports.extend((0..3).map(|i| chunk(1, i)));
+        reports.push(reply(CMD_MOTOR_MAP, &[6, 1, 64, 0, 3, 20]));
+    }
+    let err = device::read_motor_map(&mut ScriptedTransport::new(reports)).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            MotorMapError::BadCount {
+                expected: 4,
+                got: 20
+            }
+        ),
+        "{err}"
+    );
 }
 
 #[test]
