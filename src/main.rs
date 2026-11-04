@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
 use clap::{Parser, Subcommand};
+use open_haptics::capture::{Capture, PW_RECORD};
 use open_haptics::device::{self, MOTOR_MAP_LEN};
 use open_haptics::hidraw::{Hidraw, find_node};
+use open_haptics::mapper::Mapper;
+use open_haptics::profile::{builtin_profile, load_profile};
 use open_haptics::session::{self, Session};
-use open_haptics::tone;
+use open_haptics::{run, tone};
 use std::error::Error;
+use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -39,7 +43,15 @@ enum Command {
         #[arg(long, default_value_t = 2.0)]
         seconds: f64,
     },
-    Run,
+    /// Turn system audio into grip vibration until Ctrl+C (writes to the pad)
+    Run {
+        /// Mapper profile JSON; the built-in balanced profile when omitted
+        #[arg(long)]
+        profile: Option<PathBuf>,
+        /// Multiplies the motor drive, from 0 to 4
+        #[arg(long, default_value_t = 1.0)]
+        gain: f32,
+    },
     /// Put back the motor modes saved by a run that did not stop cleanly (writes to the pad)
     Restore,
 }
@@ -49,7 +61,8 @@ fn main() -> ExitCode {
     let writes_to_pad = match cli.command {
         Command::Restore => Some("restore"),
         Command::Tone { .. } => Some("tone"),
-        Command::Info | Command::Run => None,
+        Command::Run { .. } => Some("run"),
+        Command::Info => None,
     };
     if let (Some(name), false) = (writes_to_pad, cli.experimental) {
         eprintln!("error: {name} writes to the pad; pass --experimental to run it");
@@ -59,11 +72,7 @@ fn main() -> ExitCode {
         Command::Info => info(cli.device),
         Command::Restore => restore(cli.device),
         Command::Tone { seconds } => tone(cli.device, seconds),
-        // `run` is a stub until a later task implements it.
-        Command::Run => {
-            println!("not implemented");
-            Ok(())
-        }
+        Command::Run { profile, gain } => run(cli.device, profile, gain),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -103,21 +112,45 @@ fn restore(device: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn tone(device: Option<PathBuf>, seconds: f64) -> Result<(), Box<dyn Error>> {
-    let duration = Duration::try_from_secs_f64(seconds)
-        .map_err(|e| format!("--seconds must be a non-negative number: {e}"))?;
+/// A flag that SIGINT, SIGTERM and SIGHUP set, so a stop restores the pad.
+fn stop_flag() -> io::Result<Arc<AtomicBool>> {
     let stop = Arc::new(AtomicBool::new(false));
     for signal in [SIGINT, SIGTERM, SIGHUP] {
         signal_hook::flag::register(signal, Arc::clone(&stop))?;
     }
+    Ok(stop)
+}
+
+fn run(device: Option<PathBuf>, profile: Option<PathBuf>, gain: f32) -> Result<(), Box<dyn Error>> {
+    if !(0.0..=4.0).contains(&gain) {
+        return Err(format!("--gain must be a number from 0 to 4, not {gain}").into());
+    }
+    let profile = match profile {
+        Some(path) => load_profile(&path)?,
+        None => builtin_profile()?,
+    };
+    let stop = stop_flag()?;
+    // Started before the session, so a missing pw-record leaves the pad untouched.
+    let capture = Capture::spawn(PW_RECORD)?;
+    let mut mapper = Mapper::new(&profile);
+    let samples = capture.map(move |block| {
+        let mapped = mapper.process(&block?).map_err(io::Error::other)?;
+        Ok(mapped
+            .into_iter()
+            .map(|[l, r]| [l * gain, r * gain])
+            .collect())
+    });
+    let session = Session::start(Hidraw::open(&node(device)?)?, &state_dir()?)?;
+    Ok(run::run(session, samples, stop)?)
+}
+
+fn tone(device: Option<PathBuf>, seconds: f64) -> Result<(), Box<dyn Error>> {
+    let duration = Duration::try_from_secs_f64(seconds)
+        .map_err(|e| format!("--seconds must be a non-negative number: {e}"))?;
+    let stop = stop_flag()?;
     let mut session = Session::start(Hidraw::open(&node(device)?)?, &state_dir()?)?;
     let played = tone::play(&mut session, duration, &stop);
-    let stopped = session.stop();
-    let (message, outcome) = tone::finish(played, stopped, session.saved_map_path());
-    if let Some(message) = message {
-        eprintln!("open-haptics: {message}");
-    }
-    Ok(outcome?)
+    Ok(session.stop_after(played)?)
 }
 
 fn info(device: Option<PathBuf>) -> Result<(), Box<dyn Error>> {

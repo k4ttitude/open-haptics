@@ -1,5 +1,6 @@
 //! Apex 6 HID frame codec. Offsets and constants cite the vault note "Apex 6 haptics protocol".
 use std::fmt;
+use std::time::Duration;
 
 const MAGIC: [u8; 2] = [0x5A, 0xA5];
 /// Frame length for payloads up to `MAX_PAYLOAD` (note, "Frame format", builder 0x14028ebf0).
@@ -39,6 +40,9 @@ pub const NEUTRAL: u8 = 0x80;
 pub const SAMPLES_PER_PACKET: usize = 8;
 /// Motor samples per second: eight per packet, 125 packets per second (plan constraints).
 pub const MOTOR_RATE_HZ: u64 = 1000;
+/// 8 ms: one `0x57` packet of eight samples at the motor rate.
+pub const PACKET_PERIOD: Duration =
+    Duration::from_millis(SAMPLES_PER_PACKET as u64 * 1000 / MOTOR_RATE_HZ);
 /// Bit 7 always set, bits 3 and 4 enable the left and right grips, selector bits clear in
 /// grip-only use (note, item 7, 0x140285c1f to 0x140285c3c).
 const GRIP_CONTROL: u8 = 0x98;

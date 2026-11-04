@@ -2,10 +2,11 @@ mod common;
 
 use common::fake_pad::FakePad;
 use open_haptics::protocol::{
-    CMD_MOTOR_STREAM, NEUTRAL, REQUEST_PAYLOAD_START, SAMPLES_PER_PACKET, motor_packet,
+    CMD_MOTOR_STREAM, NEUTRAL, PACKET_PERIOD, REQUEST_PAYLOAD_START, SAMPLES_PER_PACKET,
+    motor_packet,
 };
-use open_haptics::session::{Session, SessionError};
-use open_haptics::tone::{PACKET_PERIOD, finish, play, tick_samples};
+use open_haptics::session::{Session, SessionError, finish};
+use open_haptics::tone::{play, tick_samples};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;

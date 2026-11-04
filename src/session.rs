@@ -177,6 +177,17 @@ impl<T: Transport> Session<T> {
         &self.map_path
     }
 
+    /// Stops the session once and combines that with the result of what ran in it, `played`.
+    /// A failed stop is printed with the kept map path and the restore command.
+    pub fn stop_after<E: From<SessionError>>(&mut self, played: Result<(), E>) -> Result<(), E> {
+        let stopped = self.stop();
+        let (message, outcome) = finish(played, stopped, &self.map_path);
+        if let Some(message) = message {
+            eprintln!("open-haptics: {message}");
+        }
+        outcome
+    }
+
     fn report_stop_failure(&self, e: &SessionError) {
         eprintln!("error: {}", stop_failure_message(e, &self.map_path));
     }
@@ -189,6 +200,21 @@ pub fn stop_failure_message(e: &SessionError, map_path: &Path) -> String {
          run open-haptics restore --experimental",
         map_path.display()
     )
+}
+
+/// Combines the result of what ran in a session with the result of `Session::stop`. A stop
+/// failure always yields a message for the user (the pad may be left in streaming mode); the
+/// returned result is the `played` error if there was one, else the stop error.
+pub fn finish<E: From<SessionError>>(
+    played: Result<(), E>,
+    stopped: Result<(), SessionError>,
+    map_path: &Path,
+) -> (Option<String>, Result<(), E>) {
+    let message = stopped
+        .as_ref()
+        .err()
+        .map(|e| stop_failure_message(e, map_path));
+    (message, played.and(stopped.map_err(E::from)))
 }
 
 impl<T: Transport> Drop for Session<T> {

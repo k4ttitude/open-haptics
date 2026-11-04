@@ -3,8 +3,10 @@ use serde::Deserialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-/// Path to the bundled balanced profile; the CLI's `--profile` default.
+/// Path to the bundled balanced profile in the source tree.
 pub const DEFAULT_PROFILE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/profiles/balanced.json");
+/// The same profile built into the binary, so `run` works wherever the binary is moved.
+const BUILTIN_PROFILE: &str = include_str!("../profiles/balanced.json");
 
 /// The motor stream is 1 kHz, so carriers stop below its 500 Hz Nyquist limit.
 const MAX_CARRIER_HZ: f32 = 400.0;
@@ -145,7 +147,17 @@ pub fn load_profile(path: &Path) -> Result<Profile, ProfileError> {
         path: path.to_owned(),
         source,
     })?;
-    let file: ProfileFile = serde_json::from_str(&text).map_err(|source| ProfileError::Parse {
+    parse_profile(&text, path)
+}
+
+/// The balanced profile built into the binary; `run` uses it when no `--profile` is given.
+pub fn builtin_profile() -> Result<Profile, ProfileError> {
+    parse_profile(BUILTIN_PROFILE, Path::new(DEFAULT_PROFILE))
+}
+
+/// Parses and validates profile JSON; `path` names its source in errors.
+fn parse_profile(text: &str, path: &Path) -> Result<Profile, ProfileError> {
+    let file: ProfileFile = serde_json::from_str(text).map_err(|source| ProfileError::Parse {
         path: path.to_owned(),
         source,
     })?;

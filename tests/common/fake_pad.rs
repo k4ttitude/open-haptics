@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// My pad's UUID (captured `0x04` reply, `tests/common/mod.rs`).
 pub const UUID_HEX: &str = "1420c46eaa1e00000000a8d704000000";
@@ -66,6 +66,8 @@ pub struct PadState {
     pub modes: BTreeMap<u8, Vec<u8>>,
     /// Every frame written, in order, including the ones that a fault refused.
     pub log: Vec<[u8; FRAME_LEN]>,
+    /// When each frame in `log` was written.
+    pub sent_at: Vec<Instant>,
     /// When false the pad sends no `0x53` ACKs.
     pub ack_mode_writes: bool,
     /// The nth write (from 1) is logged but fails with an I/O error and changes nothing.
@@ -98,6 +100,7 @@ impl FakePad {
             ram6,
             modes: modes_from_map(&ram6),
             log: Vec::new(),
+            sent_at: Vec::new(),
             ack_mode_writes: true,
             fail_write: None,
             disconnect_after_writes: None,
@@ -258,6 +261,7 @@ impl Transport for FakePad {
             return Err(disconnected());
         }
         s.log.push(*frame);
+        s.sent_at.push(Instant::now());
         if s.fail_write == Some(s.log.len()) {
             return Err(io::Error::other("FakePad: injected write failure"));
         }

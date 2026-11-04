@@ -1,9 +1,8 @@
 //! The `tone` test signal: a fixed sine per grip, sent at the motor rate.
 use crate::hidraw::Transport;
 use crate::pacer::Pacer;
-use crate::protocol::{MOTOR_RATE_HZ, SAMPLES_PER_PACKET};
-use crate::session::{Session, SessionError, stop_failure_message};
-use std::path::Path;
+use crate::protocol::{MOTOR_RATE_HZ, PACKET_PERIOD, SAMPLES_PER_PACKET};
+use crate::session::{Session, SessionError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -11,9 +10,6 @@ const LEFT_HZ: f64 = 80.0;
 const RIGHT_HZ: f64 = 120.0;
 /// Low on purpose: this is the first signal ever sent to the real pad.
 const AMPLITUDE: f32 = 0.15;
-/// 8 ms: one `0x57` packet of eight samples at the motor rate.
-pub const PACKET_PERIOD: Duration =
-    Duration::from_millis(SAMPLES_PER_PACKET as u64 * 1000 / MOTOR_RATE_HZ);
 
 /// Eight (left, right) samples starting at motor sample `first`. The phase comes from the sample
 /// counter, not an accumulator, so it does not drift.
@@ -51,19 +47,4 @@ pub fn play<T: Transport>(
         pacer.wait();
     }
     Ok(())
-}
-
-/// Combines the results of `play` and `Session::stop`. A stop failure always yields a message
-/// for the user (the pad may be left in streaming mode); the returned result is the play error
-/// if there was one, else the stop error.
-pub fn finish(
-    played: Result<(), SessionError>,
-    stopped: Result<(), SessionError>,
-    map_path: &Path,
-) -> (Option<String>, Result<(), SessionError>) {
-    let message = stopped
-        .as_ref()
-        .err()
-        .map(|e| stop_failure_message(e, map_path));
-    (message, played.and(stopped))
 }

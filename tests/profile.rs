@@ -1,4 +1,6 @@
-use open_haptics::profile::{DEFAULT_PROFILE, Profile, ProfileError, load_profile};
+use open_haptics::profile::{
+    DEFAULT_PROFILE, Profile, ProfileError, builtin_profile, load_profile,
+};
 use std::path::Path;
 
 fn load_json(json: &str) -> Result<Profile, ProfileError> {
@@ -119,4 +121,12 @@ fn rejects_non_finite_and_negative_values() {
         let json = with_field(field, literal);
         assert_eq!(load_json(&json).unwrap_err().to_string(), message, "{json}");
     }
+}
+
+#[test]
+fn built_in_profile_matches_the_bundled_file() {
+    assert_eq!(
+        builtin_profile().unwrap(),
+        load_profile(Path::new(DEFAULT_PROFILE)).unwrap()
+    );
 }
