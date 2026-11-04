@@ -50,6 +50,8 @@ pub enum ProfileError {
         source: serde_json::Error,
     },
     NoBands,
+    NotFinite,
+    NegativeLow,
     BandOrder,
     Carrier,
     BandLimit,
@@ -62,6 +64,8 @@ impl fmt::Display for ProfileError {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
             Self::Parse { path, source } => write!(f, "cannot parse {}: {source}", path.display()),
             Self::NoBands => f.write_str("profile has no mapper bands"),
+            Self::NotFinite => f.write_str("profile values must be finite numbers"),
+            Self::NegativeLow => f.write_str("lowHz must not be negative"),
             Self::BandOrder => f.write_str("mapper band highHz must exceed lowHz"),
             Self::Carrier => write!(f, "carrierHz must be between 1 and {MAX_CARRIER_HZ}"),
             Self::BandLimit => write!(f, "highHz must not exceed {MAX_BAND_HZ}"),
@@ -84,7 +88,28 @@ impl std::error::Error for ProfileError {
 }
 
 impl Band {
+    fn is_finite(&self) -> bool {
+        [
+            self.low_hz,
+            self.high_hz,
+            self.carrier_hz,
+            self.attack_ms,
+            self.release_ms,
+            self.threshold_db,
+            self.gain_db,
+        ]
+        .iter()
+        .all(|v| v.is_finite())
+    }
+
     fn validate(&self) -> Result<(), ProfileError> {
+        // JSON numbers beyond f32 range become infinite in the cast.
+        if !self.is_finite() {
+            return Err(ProfileError::NotFinite);
+        }
+        if !(0.0..).contains(&self.low_hz) {
+            return Err(ProfileError::NegativeLow);
+        }
         if self.high_hz <= self.low_hz {
             return Err(ProfileError::BandOrder);
         }
@@ -94,7 +119,9 @@ impl Band {
         if self.high_hz > MAX_BAND_HZ {
             return Err(ProfileError::BandLimit);
         }
-        if self.attack_ms < MIN_ENVELOPE_MS || self.release_ms < MIN_ENVELOPE_MS {
+        if !(MIN_ENVELOPE_MS..).contains(&self.attack_ms)
+            || !(MIN_ENVELOPE_MS..).contains(&self.release_ms)
+        {
             return Err(ProfileError::Envelope);
         }
         Ok(())
@@ -103,6 +130,9 @@ impl Band {
 
 impl Profile {
     fn validate(&self) -> Result<(), ProfileError> {
+        if !self.phase_offset_r_deg.is_finite() {
+            return Err(ProfileError::NotFinite);
+        }
         if self.bands.is_empty() {
             return Err(ProfileError::NoBands);
         }

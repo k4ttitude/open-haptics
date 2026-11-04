@@ -87,3 +87,36 @@ fn errors_name_the_file() {
     let garbled = load_json("not json").unwrap_err().to_string();
     assert!(garbled.contains("p.json"), "{garbled}");
 }
+
+/// A valid one-band profile with `field` set to the raw JSON `literal`.
+fn with_field(field: &str, literal: &str) -> String {
+    let mut values = serde_json::json!({
+        "lowHz": 100, "highHz": 200, "carrierHz": 60, "attackMs": 1,
+        "releaseMs": 1, "thresholdDb": -30, "gainDb": 0
+    });
+    let band = values.as_object_mut().unwrap();
+    if field == "phaseOffsetRDeg" {
+        return format!(r#"{{"mapper":{{"{field}":{literal},"bands":[{values}]}}}}"#);
+    }
+    band.remove(field);
+    let rest = values.to_string();
+    let rest = rest.trim_start_matches('{').trim_end_matches('}');
+    format!(r#"{{"mapper":{{"bands":[{{"{field}":{literal},{rest}}}]}}}}"#)
+}
+
+#[test]
+fn rejects_non_finite_and_negative_values() {
+    let finite = "profile values must be finite numbers";
+    let cases = [
+        ("gainDb", "1e40", finite),
+        ("thresholdDb", "-1e40", finite),
+        ("lowHz", "-1e40", finite),
+        ("releaseMs", "1e40", finite),
+        ("phaseOffsetRDeg", "1e40", finite),
+        ("lowHz", "-1", "lowHz must not be negative"),
+    ];
+    for (field, literal, message) in cases {
+        let json = with_field(field, literal);
+        assert_eq!(load_json(&json).unwrap_err().to_string(), message, "{json}");
+    }
+}
