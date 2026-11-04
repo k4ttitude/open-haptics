@@ -11,6 +11,8 @@ const REQUEST_PAYLOAD_START: usize = 4;
 const REPLY_PAYLOAD_START: usize = 5;
 
 pub const CMD_INFO: u8 = 0x01;
+pub const CMD_UUID: u8 = 0x04;
+pub const CMD_SLOT: u8 = 0xA1;
 pub const CMD_MODE: u8 = 0x53;
 pub const CMD_MOTOR_MAP: u8 = 0xA3;
 pub const CMD_MOTOR_STREAM: u8 = 0x57;
