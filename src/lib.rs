@@ -2,6 +2,7 @@
 
 pub mod device;
 pub mod hidraw;
+pub mod mapper;
 pub mod pacer;
 pub mod profile;
 pub mod protocol;
