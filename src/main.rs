@@ -112,10 +112,12 @@ fn tone(device: Option<PathBuf>, seconds: f64) -> Result<(), Box<dyn Error>> {
     }
     let mut session = Session::start(Hidraw::open(&node(device)?)?, &state_dir()?)?;
     let played = tone::play(&mut session, duration, &stop);
-    // Always restore the pad; if both fail, the send error is the one worth reporting.
     let stopped = session.stop();
-    played?;
-    Ok(stopped?)
+    let (message, outcome) = tone::finish(played, stopped, session.saved_map_path());
+    if let Some(message) = message {
+        eprintln!("open-haptics: {message}");
+    }
+    Ok(outcome?)
 }
 
 fn info(device: Option<PathBuf>) -> Result<(), Box<dyn Error>> {

@@ -4,8 +4,9 @@ use common::fake_pad::FakePad;
 use open_haptics::protocol::{
     CMD_MOTOR_STREAM, NEUTRAL, REQUEST_PAYLOAD_START, SAMPLES_PER_PACKET, motor_packet,
 };
-use open_haptics::session::Session;
-use open_haptics::tone::{PACKET_PERIOD, play, tick_samples};
+use open_haptics::session::{Session, SessionError};
+use open_haptics::tone::{PACKET_PERIOD, finish, play, tick_samples};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -76,4 +77,50 @@ fn play_stops_when_flagged() {
     .unwrap();
     assert_eq!(pad.count(CMD_MOTOR_STREAM), 0);
     session.stop().unwrap();
+}
+
+fn failure(text: &str) -> Result<(), SessionError> {
+    Err(SessionError::Io(std::io::Error::other(text.to_string())))
+}
+
+fn finish_with(
+    played: Result<(), SessionError>,
+    stopped: Result<(), SessionError>,
+) -> (Option<String>, Result<(), SessionError>) {
+    finish(played, stopped, Path::new("/state/motor-map-x.bin"))
+}
+
+#[test]
+fn both_failing_reports_the_stop_failure_and_returns_the_send_error() {
+    let (message, outcome) = finish_with(failure("send"), failure("stop"));
+    let message = message.expect("stop failure is reported");
+    assert!(message.contains("stop"));
+    assert!(message.contains("/state/motor-map-x.bin"));
+    assert!(message.contains("open-haptics restore --experimental"));
+    assert!(outcome.unwrap_err().to_string().contains("send"));
+}
+
+#[test]
+fn send_failure_alone_has_no_stop_message() {
+    let (message, outcome) = finish_with(failure("send"), Ok(()));
+    assert!(message.is_none());
+    assert!(outcome.unwrap_err().to_string().contains("send"));
+}
+
+#[test]
+fn stop_failure_alone_is_reported_and_returned() {
+    let (message, outcome) = finish_with(Ok(()), failure("stop"));
+    assert!(
+        message
+            .expect("reported")
+            .contains("restore --experimental")
+    );
+    assert!(outcome.unwrap_err().to_string().contains("stop"));
+}
+
+#[test]
+fn clean_play_and_stop_is_ok() {
+    let (message, outcome) = finish_with(Ok(()), Ok(()));
+    assert!(message.is_none());
+    assert!(outcome.is_ok());
 }

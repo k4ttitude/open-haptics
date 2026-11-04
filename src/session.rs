@@ -172,13 +172,23 @@ impl<T: Transport> Session<T> {
         Ok(())
     }
 
-    fn report_stop_failure(&self, e: &SessionError) {
-        eprintln!(
-            "error: restoring the pad's motor modes failed: {e}. The saved map stays at {}; \
-             run open-haptics restore --experimental",
-            self.map_path.display()
-        );
+    /// Where `start` saved the motor map; it stays there when `stop` fails.
+    pub fn saved_map_path(&self) -> &Path {
+        &self.map_path
     }
+
+    fn report_stop_failure(&self, e: &SessionError) {
+        eprintln!("error: {}", stop_failure_message(e, &self.map_path));
+    }
+}
+
+/// Tells the user the pad was not restored and how to fix that.
+pub fn stop_failure_message(e: &SessionError, map_path: &Path) -> String {
+    format!(
+        "restoring the pad's motor modes failed: {e}. The saved map stays at {}; \
+         run open-haptics restore --experimental",
+        map_path.display()
+    )
 }
 
 impl<T: Transport> Drop for Session<T> {
