@@ -16,6 +16,24 @@ pub const CMD_SLOT: u8 = 0xA1;
 pub const CMD_MODE: u8 = 0x53;
 pub const CMD_MOTOR_MAP: u8 = 0xA3;
 pub const CMD_MOTOR_STREAM: u8 = 0x57;
+pub const CMD_CONTROL: u8 = 0xFC;
+
+/// Area 1 holds the realtime motor modes; payloads are `01 target mode params` (note, item 6
+/// step 7, 0x140284109).
+pub const AREA_REALTIME: u8 = 0x01;
+/// Target 02 (inferred: both triggers) to mode 0, the grip-only start write and stop step 3
+/// (note, item 5, 0x14027e54e; item 6, 0x14027e830).
+pub const TRIGGERS_OFF: [u8; 3] = [AREA_REALTIME, 0x02, 0x00];
+/// Both grips (target 12) to mode 2 with params `40 00` (note, item 5, 0x14027e5f2).
+pub const GRIPS_STREAM: [u8; 5] = [AREA_REALTIME, 0x12, 0x02, 0x40, 0x00];
+/// Both grips to mode 0, stop step 4 (note, item 6, 0x14027e943).
+pub const GRIPS_OFF: [u8; 3] = [AREA_REALTIME, 0x12, 0x00];
+/// `0x53` ACK status for success; the status is reply payload byte 0 (note, item 1, 0x1402855e2).
+pub const ACK_OK: u8 = 0x00;
+/// `0xFC` codes sent at start, in order (note, item 5, 0x1402861eb, 0x1402861fa).
+pub const CONTROL_START: [u8; 2] = [0x01, 0x03];
+/// `0xFC` code sent at stop (note, item 6 step 2, 0x140104818).
+pub const CONTROL_STOP: u8 = 0x02;
 
 /// Byte that quantizes to silence (note, item 8, 0.0 gives 0x80).
 pub const NEUTRAL: u8 = 0x80;
@@ -74,6 +92,18 @@ fn assemble(cmd: u8, payload: &[u8]) -> [u8; FRAME_LEN] {
     out[3] = payload.len() as u8 + 2;
     out[REQUEST_PAYLOAD_START..REQUEST_PAYLOAD_START + payload.len()].copy_from_slice(payload);
     out[FRAME_LEN - 1] = checksum(&out[2..FRAME_LEN - 1]);
+    out
+}
+
+/// Builds the short `0xFC` frame `5A A5 FC 03 code chk`: the checksum is `code - 1` at byte 5
+/// and bytes 6 to 31 are zero (note, "Frame format", 0x140284de0).
+pub fn control_frame(code: u8) -> [u8; FRAME_LEN] {
+    let mut out = [0; FRAME_LEN];
+    out[..2].copy_from_slice(&MAGIC);
+    out[2] = CMD_CONTROL;
+    out[3] = 0x03;
+    out[4] = code;
+    out[5] = code.wrapping_sub(1);
     out
 }
 
@@ -187,6 +217,31 @@ mod tests {
         }
         // Deliberate deviation: the engine yields 0x00 for NaN (note section 8), we send neutral.
         assert_eq!(quantize(f32::NAN), 128);
+    }
+
+    /// Worked `0xFC` frames from the note, items 5 and 6.
+    #[test]
+    fn control_frames_match_engine_layout() {
+        let zeros = "00".repeat(26);
+        assert_eq!(hex(&control_frame(1)), format!("5aa5fc030100{zeros}"));
+        assert_eq!(hex(&control_frame(2)), format!("5aa5fc030201{zeros}"));
+        assert_eq!(hex(&control_frame(3)), format!("5aa5fc030302{zeros}"));
+    }
+
+    /// Worked `0x53` frames from the note, items 5 and 6: (payload, length byte, checksum).
+    #[test]
+    fn mode_frames_match_engine_layout() {
+        for (payload, len, chk) in [
+            (&TRIGGERS_OFF[..], 0x05, 0x5B),
+            (&GRIPS_STREAM[..], 0x07, 0xAF),
+            (&GRIPS_OFF[..], 0x05, 0x6B),
+        ] {
+            let f = frame(CMD_MODE, payload).unwrap();
+            assert_eq!(f[..4], [0x5A, 0xA5, CMD_MODE, len]);
+            assert_eq!(&f[4..4 + payload.len()], payload);
+            assert!(f[4 + payload.len()..31].iter().all(|b| *b == 0));
+            assert_eq!(f[31], chk);
+        }
     }
 
     #[test]

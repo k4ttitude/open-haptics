@@ -1,6 +1,8 @@
 // Each test crate uses a different part of this module.
 #![allow(dead_code)]
 
+pub mod fake_pad;
+
 use open_haptics::hidraw::Transport;
 use open_haptics::protocol::FRAME_LEN;
 use std::collections::VecDeque;
