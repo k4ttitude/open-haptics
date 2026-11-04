@@ -1,0 +1,10 @@
+{
+  "mapper": {
+    "phaseOffsetRDeg": 180,
+    "bands": [
+      { "lowHz": 1000, "highHz": 3000, "carrierHz": 60, "attackMs": 1, "releaseMs": 20, "thresholdDb": -32, "gainDb": 6 },
+      { "lowHz": 3000, "highHz": 6000, "carrierHz": 90, "attackMs": 1, "releaseMs": 10, "thresholdDb": -35, "gainDb": 8 },
+      { "lowHz": 6000, "highHz": 12000, "carrierHz": 170, "attackMs": 1, "releaseMs": 5, "thresholdDb": -35, "gainDb": 10 }
+    ]
+  }
+}
