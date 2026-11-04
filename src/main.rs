@@ -3,10 +3,16 @@
 use clap::{Parser, Subcommand};
 use open_haptics::device::{self, MOTOR_MAP_LEN};
 use open_haptics::hidraw::{Hidraw, find_node};
-use open_haptics::session;
+use open_haptics::session::{self, Session};
+use open_haptics::tone;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+
+use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 
 const SYSFS_HIDRAW: &str = "/sys/class/hidraw";
 
@@ -27,7 +33,12 @@ struct Cli {
 enum Command {
     /// Print device info, UUID, active slot and motor map (read-only)
     Info,
-    Tone,
+    /// Play a test tone on both grips (80 Hz left, 120 Hz right; writes to the pad)
+    Tone {
+        /// How long to play
+        #[arg(long, default_value_t = 2.0)]
+        seconds: f64,
+    },
     Run,
     /// Put back the motor modes saved by a run that did not stop cleanly (writes to the pad)
     Restore,
@@ -35,15 +46,21 @@ enum Command {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if matches!(cli.command, Command::Restore) && !cli.experimental {
-        eprintln!("error: restore writes to the pad; pass --experimental to run it");
+    let writes_to_pad = match cli.command {
+        Command::Restore => Some("restore"),
+        Command::Tone { .. } => Some("tone"),
+        Command::Info | Command::Run => None,
+    };
+    if let (Some(name), false) = (writes_to_pad, cli.experimental) {
+        eprintln!("error: {name} writes to the pad; pass --experimental to run it");
         return ExitCode::from(2);
     }
     let result = match cli.command {
         Command::Info => info(cli.device),
         Command::Restore => restore(cli.device),
-        // The remaining subcommands are stubs until the later tasks implement them.
-        Command::Tone | Command::Run => {
+        Command::Tone { seconds } => tone(cli.device, seconds),
+        // `run` is a stub until a later task implements it.
+        Command::Run => {
             println!("not implemented");
             Ok(())
         }
@@ -51,7 +68,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("open-haptics: {e}");
             ExitCode::FAILURE
         }
     }
@@ -84,6 +101,21 @@ fn restore(device: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
     session::restore_from_file(&mut pad, &state_dir()?)?;
     println!("restored the saved motor modes and deleted the saved map");
     Ok(())
+}
+
+fn tone(device: Option<PathBuf>, seconds: f64) -> Result<(), Box<dyn Error>> {
+    let duration = Duration::try_from_secs_f64(seconds)
+        .map_err(|e| format!("--seconds must be a non-negative number: {e}"))?;
+    let stop = Arc::new(AtomicBool::new(false));
+    for signal in [SIGINT, SIGTERM, SIGHUP] {
+        signal_hook::flag::register(signal, Arc::clone(&stop))?;
+    }
+    let mut session = Session::start(Hidraw::open(&node(device)?)?, &state_dir()?)?;
+    let played = tone::play(&mut session, duration, &stop);
+    // Always restore the pad; if both fail, the send error is the one worth reporting.
+    let stopped = session.stop();
+    played?;
+    Ok(stopped?)
 }
 
 fn info(device: Option<PathBuf>) -> Result<(), Box<dyn Error>> {

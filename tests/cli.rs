@@ -10,3 +10,13 @@ fn restore_needs_experimental() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--experimental"));
 }
+
+#[test]
+fn tone_needs_experimental() {
+    let out = Command::new(env!("CARGO_BIN_EXE_open-haptics"))
+        .args(["--device", "/nonexistent/hidraw", "tone"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--experimental"));
+}
