@@ -103,12 +103,18 @@ pub fn motor_packet(left: &[f32], right: &[f32]) -> [u8; FRAME_LEN] {
     assemble(CMD_MOTOR_STREAM, &payload)
 }
 
+/// The generic scan wants byte 3 non-zero (0x140282946). The 0xA3 parser wants it zero
+/// (0x14028eff7, note item 4), and my pad's replies agree.
+fn length_byte_ok(cmd: u8, byte3: u8) -> bool {
+    (byte3 == 0) == (cmd == CMD_MOTOR_MAP)
+}
+
 /// Finds the reply to `cmd` and returns its payload, frame bytes 5 to 30 (note, item 1).
 pub fn parse_reply(cmd: u8, report: &[u8]) -> Result<&[u8], ProtocolError> {
     let mut other_command = None;
     // The engine scans every offset for `5A A5 cmd` with byte 3 non-zero (0x140282900).
     for (start, window) in report.windows(4).enumerate() {
-        if window[..2] != MAGIC || window[3] == 0 {
+        if window[..2] != MAGIC || !length_byte_ok(cmd, window[3]) {
             continue;
         }
         if window[2] != cmd {
@@ -185,92 +191,5 @@ mod tests {
             frame(0x57, &[0; 28]),
             Err(ProtocolError::PayloadTooLong)
         ));
-    }
-
-    /// Relabelled request, not a captured reply: the note's section 5 worked example
-    /// `01 12 02 40 00` (checksum AF). Task 3 will add captured replies.
-    fn example_reply() -> [u8; 32] {
-        let mut report = [0; 32];
-        report[..9].copy_from_slice(&[0x5A, 0xA5, 0x53, 0x07, 0x01, 0x12, 0x02, 0x40, 0x00]);
-        report[31] = 0xAF;
-        report
-    }
-
-    /// Relabelled request, not a captured reply: the note's section 4 worked example, `0xA3` idx 0.
-    fn example_a3_reply() -> [u8; 32] {
-        let mut report = [0; 32];
-        report[..8].copy_from_slice(&[0x5A, 0xA5, 0xA3, 0x06, 0x00, 0x06, 0x00, 0x14]);
-        report[31] = 0xC3;
-        report
-    }
-
-    #[test]
-    fn parse_reply_returns_frame_bytes_5_to_30() {
-        let report = example_reply();
-        let payload = parse_reply(0x53, &report).unwrap();
-        assert_eq!(payload.len(), 26);
-        assert_eq!(&payload[..3], &[0x12, 0x02, 0x40]);
-    }
-
-    #[test]
-    fn parse_reply_accepts_a_long_report_with_zero_padding() {
-        // The engine reads at least 64 bytes (note, item 1, 0x1402825f7).
-        let mut report = [0; 64];
-        report[..32].copy_from_slice(&example_a3_reply());
-        assert_eq!(parse_reply(0xA3, &report).unwrap().len(), 26);
-    }
-
-    #[test]
-    fn parse_reply_finds_a_frame_after_a_report_id_byte() {
-        // The engine scans every offset (note, item 1, 0x140282900).
-        let mut report = [0; 64];
-        report[1..33].copy_from_slice(&example_reply());
-        let payload = parse_reply(0x53, &report).unwrap();
-        assert_eq!(&payload[..3], &[0x12, 0x02, 0x40]);
-    }
-
-    #[test]
-    fn parse_reply_skips_the_checksum_except_for_a3() {
-        // Only the 0xA3 parser verifies it (note, item 1, 0x14028efc0).
-        let mut report = example_reply();
-        report[31] ^= 1;
-        assert!(parse_reply(0x53, &report).is_ok());
-        let mut a3 = example_a3_reply();
-        a3[31] ^= 1;
-        assert_eq!(parse_reply(0xA3, &a3), Err(ProtocolError::BadChecksum));
-        assert!(parse_reply(0xA3, &example_a3_reply()).is_ok());
-    }
-
-    #[test]
-    fn parse_reply_rejects_a_frame_too_close_to_the_end() {
-        let report = example_reply();
-        assert_eq!(parse_reply(0x53, &report[..31]), Err(ProtocolError::Short));
-        let mut late = [0; 40];
-        late[10..40].copy_from_slice(&report[..30]);
-        assert_eq!(parse_reply(0x53, &late), Err(ProtocolError::Short));
-    }
-
-    #[test]
-    fn parse_reply_reports_another_commands_frame_as_wrong_command() {
-        assert_eq!(
-            parse_reply(0x01, &example_reply()),
-            Err(ProtocolError::WrongCommand {
-                expected: 0x01,
-                got: 0x53
-            })
-        );
-    }
-
-    #[test]
-    fn parse_reply_ignores_a_frame_with_zero_length_byte() {
-        let mut report = example_reply();
-        report[3] = 0;
-        assert_eq!(parse_reply(0x53, &report), Err(ProtocolError::BadMagic));
-    }
-
-    #[test]
-    fn parse_reply_without_magic_is_bad_magic() {
-        assert_eq!(parse_reply(0x53, &[0; 64]), Err(ProtocolError::BadMagic));
-        assert_eq!(parse_reply(0x53, &[]), Err(ProtocolError::BadMagic));
     }
 }

@@ -114,3 +114,27 @@ fn reads_the_uuid_as_32_hex_digits() {
         "a0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
     );
 }
+
+#[test]
+fn reads_the_captured_replies_from_my_pad() {
+    use common::captured::{self, INFO, MOTOR_MAP_CHUNKS, SLOT, UUID};
+    let mut t = ScriptedTransport::new(vec![captured::bytes(INFO)]);
+    let info = device::read_info(&mut t).unwrap();
+    assert!(info.feature_haptic());
+    assert_eq!(info.device_id, 0x98);
+
+    let mut t = ScriptedTransport::new(vec![captured::bytes(UUID)]);
+    assert_eq!(
+        device::read_uuid(&mut t).unwrap(),
+        "1420c46eaa1e00000000a8d704000000"
+    );
+
+    let mut reports = vec![captured::bytes(SLOT)];
+    reports.extend(MOTOR_MAP_CHUNKS.map(captured::bytes));
+    let mut t = ScriptedTransport::new(reports);
+    let read = device::read_motor_map(&mut t).unwrap();
+    assert_eq!(read.slot, 0);
+    assert_eq!(&read.map[..5], &[0x02, 0x02, 0x00, 0x40, 0x06]);
+    // Left and right grip entries: mode 1, param 0x40 (note, item 4, offsets 23 to 26).
+    assert_eq!(&read.map[23..27], &[0x01, 0x40, 0x01, 0x40]);
+}
