@@ -3,19 +3,16 @@
 //! sequence touched back from that map, then deletes the file. Sequences follow the vault note
 //! "Apex 6 haptics protocol", items 5 and 6, grip-only path.
 use crate::device::{self, InfoError, MOTOR_MAP_LEN, MotorMapError};
-use crate::hidraw::{AskError, Transport, ask};
+use crate::hidraw::{AskError, Transport};
 use crate::protocol::{
-    self, ACK_OK, AREA_REALTIME, CMD_MODE, CONTROL_START, CONTROL_STOP, GRIPS_OFF, GRIPS_STREAM,
+    self, AREA_REALTIME, CMD_MODE, CONTROL_START, CONTROL_STOP, GRIPS_OFF, GRIPS_STREAM,
     ProtocolError, TRIGGERS_OFF,
 };
 use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-/// The engine's one ACK-checked `0x53` path waits 500 ms (note, item 1, 0x140284e80, 0x140285318).
-const ACK_TIMEOUT: Duration = Duration::from_millis(0x1f4);
 /// RAM 6 layout version the engine accepts (note, item 4, 0x14028ed29).
 const LAYOUT_VERSION: u8 = 0x02;
 /// RAM 6 layout 2 entries in restore order: target, offset of its mode byte, and how many param
@@ -27,15 +24,11 @@ const MAP_ENTRIES: [(u8, usize, &[usize]); 4] = [
     (0x10, 23, &[0, 1]),
     (0x11, 25, &[0, 1]),
 ];
-/// Upper bound on stale reports dropped before the ACK-checked write, so a chatty node can't
-/// stall start.
-const MAX_STALE_REPORTS: usize = 64;
 
 #[derive(Debug)]
 pub enum SessionError {
     NotLinearGrips,
     UnknownMapLayout,
-    Refused { status: u8 },
     SavedMapExists(PathBuf),
     NoSavedMap(PathBuf),
     Info(InfoError),
@@ -56,11 +49,6 @@ impl fmt::Display for SessionError {
                 f,
                 "the pad's motor map has a layout this tool cannot restore, so it will not \
                  change the motor modes"
-            ),
-            Self::Refused { status } => write!(
-                f,
-                "the pad refused the grip mode write with status {status:#04x} ({})",
-                ack_meaning(*status)
             ),
             Self::SavedMapExists(path) => write!(
                 f,
@@ -110,15 +98,6 @@ impl From<ProtocolError> for SessionError {
 impl From<io::Error> for SessionError {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
-    }
-}
-
-/// `0x53` ACK status meanings (note, item 1, 0x140285760, 0x1402857ac, 0x1402857ee).
-fn ack_meaning(status: u8) -> &'static str {
-    match status {
-        0x01 => "area, target or mode invalid, or params too short",
-        0x02 => "payload shorter than 3 bytes",
-        _ => "unknown status",
     }
 }
 
@@ -183,16 +162,10 @@ impl<T: Transport> Session<T> {
     }
 
     /// Grip-only start: triggers off, grips to streaming, then `0xFC` codes 1 and 3 (note,
-    /// item 5). Only the grip write waits for its ACK, as the engine's 0x140284e80 path does.
+    /// item 5). Like the engine, it reads no reply to any of them (note, item 1, 0x14027bb80).
     fn enable(&mut self) -> Result<(), SessionError> {
         write_mode(&mut self.t, &TRIGGERS_OFF)?;
-        drop_stale_reports(&mut self.t)?;
-        let ack = ask(&mut self.t, CMD_MODE, &GRIPS_STREAM, ACK_TIMEOUT)?;
-        match ack.first() {
-            Some(&ACK_OK) => {}
-            Some(&status) => return Err(SessionError::Refused { status }),
-            None => return Err(ProtocolError::Short.into()),
-        }
+        write_mode(&mut self.t, &GRIPS_STREAM)?;
         for code in CONTROL_START {
             self.t.write(&protocol::control_frame(code))?;
         }
@@ -246,17 +219,6 @@ fn restore_pad<T: Transport>(t: &mut T, restore: &[Vec<u8>]) -> Result<(), Sessi
 
 fn write_mode<T: Transport>(t: &mut T, payload: &[u8]) -> Result<(), SessionError> {
     t.write(&protocol::frame(CMD_MODE, payload)?)?;
-    Ok(())
-}
-
-/// Drops reports already queued, such as the ACK of an unchecked `0x53`, so the next reply read
-/// is not an older one with the same command byte (note, item 1, no sequence number).
-fn drop_stale_reports<T: Transport>(t: &mut T) -> io::Result<()> {
-    for _ in 0..MAX_STALE_REPORTS {
-        if t.read(Duration::ZERO)?.is_none() {
-            break;
-        }
-    }
     Ok(())
 }
 

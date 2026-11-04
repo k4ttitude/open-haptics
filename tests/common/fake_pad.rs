@@ -66,8 +66,10 @@ pub struct PadState {
     pub modes: BTreeMap<u8, Vec<u8>>,
     /// Every frame written, in order, including the ones that a fault refused.
     pub log: Vec<[u8; FRAME_LEN]>,
-    /// `(n, status)`: the nth `0x53` write (from 1) gets this ACK status and changes nothing.
-    pub nack_mode_write: Option<(usize, u8)>,
+    /// When false the pad sends no `0x53` ACKs.
+    pub ack_mode_writes: bool,
+    /// The nth write (from 1) is logged but fails with an I/O error and changes nothing.
+    pub fail_write: Option<usize>,
     /// The pad unplugs once this many writes went through: later writes and reads fail.
     pub disconnect_after_writes: Option<usize>,
     /// When set, the pad reads this file as the first `0x53` arrives.
@@ -96,7 +98,8 @@ impl FakePad {
             ram6,
             modes: modes_from_map(&ram6),
             log: Vec::new(),
-            nack_mode_write: None,
+            ack_mode_writes: true,
+            fail_write: None,
             disconnect_after_writes: None,
             watch_file: None,
             file_at_first_mode_write: None,
@@ -216,17 +219,15 @@ impl PadState {
         {
             self.file_at_first_mode_write = Some(std::fs::read(path).ok());
         }
-        let status = match self.nack_mode_write {
-            Some((n, status)) if n == self.mode_writes => status,
-            _ => 0,
-        };
         let p = payload(frame).to_vec();
-        if status == 0 && p.len() >= 3 && p[0] == 0x01 {
+        if p.len() >= 3 && p[0] == 0x01 {
             for target in targets(p[1]) {
                 self.modes.insert(target, p[2..].to_vec());
             }
         }
-        self.replies.push_back(reply(CMD_MODE, &[status]));
+        if self.ack_mode_writes {
+            self.replies.push_back(reply(CMD_MODE, &[0]));
+        }
     }
 
     /// Grip samples are bytes 1 and 2 of each triple (note, item 7).
@@ -257,6 +258,9 @@ impl Transport for FakePad {
             return Err(disconnected());
         }
         s.log.push(*frame);
+        if s.fail_write == Some(s.log.len()) {
+            return Err(io::Error::other("FakePad: injected write failure"));
+        }
         s.handle(frame)
     }
 

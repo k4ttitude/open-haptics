@@ -109,13 +109,23 @@ fn unknown_map_layout_refuses_without_writing() {
 }
 
 #[test]
-fn nack_during_setup_restores_and_returns_refused() {
+fn start_needs_no_acks() {
+    // The engine reads no reply to any realtime 0x53 write (note, item 1).
+    let (pad, dir, _) = setup();
+    pad.state().ack_mode_writes = false;
+    let mut session = Session::start(pad.clone(), dir.path()).unwrap();
+    session.stop().unwrap();
+    assert_eq!(pad.writes(), then_stop(&START_WRITES));
+}
+
+#[test]
+fn write_error_on_grip_enable_restores_and_returns_the_error() {
     let (pad, dir, path) = setup();
     let before = pad.modes();
-    // The second 0x53 is the grip enable, the one write whose ACK the session checks.
-    pad.state().nack_mode_write = Some((2, 1));
+    // Write 9 is the grip enable `01 12 02 40 00`.
+    pad.state().fail_write = Some(READS + 2);
     let result = Session::start(pad.clone(), dir.path());
-    assert!(matches!(result, Err(SessionError::Refused { status: 1 })));
+    assert!(matches!(result, Err(SessionError::Io(_))));
     assert_eq!(pad.writes(), then_stop(&START_WRITES[..2]));
     assert_eq!(pad.modes(), before);
     assert!(!path.exists());
@@ -141,10 +151,7 @@ fn disconnect_during_setup_keeps_the_map_file() {
     let (pad, dir, path) = setup();
     pad.state().disconnect_after_writes = Some(READS + 1);
     let result = Session::start(pad.clone(), dir.path());
-    assert!(matches!(
-        result,
-        Err(SessionError::Io(_) | SessionError::Ask(_))
-    ));
+    assert!(matches!(result, Err(SessionError::Io(_))));
     assert_eq!(fs::read(&path).unwrap(), MAP);
 }
 

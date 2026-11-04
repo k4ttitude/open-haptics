@@ -28,8 +28,6 @@ pub const TRIGGERS_OFF: [u8; 3] = [AREA_REALTIME, 0x02, 0x00];
 pub const GRIPS_STREAM: [u8; 5] = [AREA_REALTIME, 0x12, 0x02, 0x40, 0x00];
 /// Both grips to mode 0, stop step 4 (note, item 6, 0x14027e943).
 pub const GRIPS_OFF: [u8; 3] = [AREA_REALTIME, 0x12, 0x00];
-/// `0x53` ACK status for success; the status is reply payload byte 0 (note, item 1, 0x1402855e2).
-pub const ACK_OK: u8 = 0x00;
 /// `0xFC` codes sent at start, in order (note, item 5, 0x1402861eb, 0x1402861fa).
 pub const CONTROL_START: [u8; 2] = [0x01, 0x03];
 /// `0xFC` code sent at stop (note, item 6 step 2, 0x140104818).
