@@ -29,6 +29,13 @@ CASES = {
         "seconds": 0.5,
         "off_after": 0.2,
     },
+    "two_tone_loud": {
+        "tones": [
+            {"hz": 2000, "amp": 0.5, "channels": [0, 1]},
+            {"hz": 4500, "amp": 0.5, "channels": [0, 1]},
+        ],
+        "seconds": 0.5,
+    },
     "left_only": {"tones": [{"hz": 2000, "amp": 0.05, "channels": [0]}], "seconds": 0.5},
 }
 

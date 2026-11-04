@@ -86,10 +86,10 @@ impl Spectrum {
     }
 }
 
-/// `|X|²` per bin of the Hann-windowed frame.
-pub fn power_spectrum(frame: &[f32; WINDOW]) -> Vec<f32> {
-    // The frame length is fixed, so the FFT cannot fail on it.
-    Spectrum::new().power(frame).unwrap_or_default()
+/// `|X|²` per bin of the Hann-windowed frame. Plans an FFT per call, so it suits tests and
+/// diagnostics; `Mapper` plans once.
+pub fn power_spectrum(frame: &[f32; WINDOW]) -> Result<Vec<f32>, MapperError> {
+    Spectrum::new().power(frame)
 }
 
 /// Power with `low_hz <= f < high_hz` in dB relative to a full-scale sine.
@@ -266,7 +266,7 @@ mod tests {
             assert!(worst < 1e-4, "{path:?} differs by {worst}");
             count += 1;
         }
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
     }
 
     #[test]
@@ -275,7 +275,7 @@ mod tests {
         for (i, s) in frame.iter_mut().enumerate() {
             *s = (2.0 * PI * 2000.0 * i as f64 / RATE as f64).sin() as f32;
         }
-        let db = band_db(&power_spectrum(&frame), 1000.0, 3000.0);
+        let db = band_db(&power_spectrum(&frame).unwrap(), 1000.0, 3000.0);
         assert!(db.abs() < 0.5, "{db}");
     }
 
