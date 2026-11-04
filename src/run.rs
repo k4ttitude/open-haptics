@@ -105,9 +105,13 @@ pub fn run<T: Transport>(
         let stop = Arc::clone(&stop);
         thread::spawn(move || feed(samples, &queue, &stop))
     };
-    let sent = send_loop(&mut session, &queue, &source, &stop);
+    let mut sent = send_loop(&mut session, &queue, &source, &stop);
     // Tells the source thread to quit too.
     stop.store(true, Ordering::Relaxed);
+    // The pad holds its last sample until the restore, which waits on the source thread first.
+    if sent.is_ok() {
+        sent = session.send(&[0.0; SAMPLES_PER_PACKET], &[0.0; SAMPLES_PER_PACKET]);
+    }
     let played = sent.map_err(RunError::from).and(source_result(source));
     session.stop_after(played)
 }

@@ -3,7 +3,7 @@ mod common;
 use common::fake_pad::{FakePad, UUID_HEX};
 use open_haptics::pacer::Pacer;
 use open_haptics::protocol::{
-    CMD_MOTOR_STREAM, NEUTRAL, REQUEST_PAYLOAD_START, SAMPLES_PER_PACKET,
+    CMD_CONTROL, CMD_MOTOR_STREAM, NEUTRAL, REQUEST_PAYLOAD_START, SAMPLES_PER_PACKET,
 };
 use open_haptics::run::{RunError, run};
 use open_haptics::session::{Session, map_path};
@@ -142,7 +142,8 @@ fn steady_tone_has_no_padded_samples() {
         .iter()
         .position(|(_, grips)| !is_neutral(grips))
         .expect("some tone was sent");
-    let tone = &packets[first_tone..];
+    // The last packet is the neutral one sent on stop.
+    let tone = &packets[first_tone..packets.len() - 1];
     // 500 ms of tone is 62 packets; the prefill and the end take a few.
     assert!(tone.len() >= 50, "{} tone packets", tone.len());
     for (i, (_, grips)) in tone.iter().enumerate() {
@@ -261,4 +262,38 @@ fn send_failure_keeps_the_saved_map() {
     let err = run(session, source, Arc::default()).unwrap_err();
     assert!(matches!(err, RunError::Session(_)), "{err}");
     assert!(map_path(dir.path(), UUID_HEX).exists());
+}
+
+#[test]
+fn stop_sends_neutral_before_the_restore() {
+    let pad = FakePad::new();
+    let dir = tempfile::tempdir().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    // Stops mid-tone, so the queue still holds samples and the last packet sent carried them.
+    let signal = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        flag.store(true, Ordering::Relaxed);
+    });
+    run_with(&pad, dir.path(), PacedSource::new(usize::MAX, TONE), stop).unwrap();
+    signal.join().unwrap();
+
+    let log = pad.state().log.clone();
+    let first_motor = log.iter().position(|f| f[2] == CMD_MOTOR_STREAM).unwrap();
+    let restore = first_motor
+        + log[first_motor..]
+            .iter()
+            .position(|f| f[2] == CMD_CONTROL)
+            .expect("the stop sequence ran");
+    let last_motor = log[..restore]
+        .iter()
+        .rposition(|f| f[2] == CMD_MOTOR_STREAM)
+        .unwrap();
+    let packets = motor_packets(&pad);
+    assert!(packets.iter().any(|(_, grips)| !is_neutral(grips)));
+    let triples = &log[last_motor][REQUEST_PAYLOAD_START + 1..][..3 * SAMPLES_PER_PACKET];
+    assert!(
+        triples.iter().all(|b| *b == NEUTRAL),
+        "last packet before the restore is not neutral"
+    );
 }
