@@ -1,6 +1,6 @@
 # open-haptics
 
-open-haptics makes a Flydigi Apex 6 Pro's grips vibrate in time with whatever plays on your PipeWire output. It does on Linux what Flydigi's Windows-only xHaptics Engine does. I wrote the HID protocol from a decompile of engine 5.0.2.8 and checked it on a real pad.
+open-haptics makes a Flydigi Apex 6 Pro's grips vibrate in time with whatever plays on your PipeWire output. It is a Linux port of Flydigi's Windows-only xHaptics Engine. The HID protocol comes from a decompile of engine 5.0.2.8 and was checked on a real pad.
 
 > [!WARNING]
 > This is experimental. Commands that write to the controller need `--experimental`. It has run on one Apex 6 Pro over the 2.4 GHz dongle. Streaming live audio (`run`) has not yet been tested on hardware.
